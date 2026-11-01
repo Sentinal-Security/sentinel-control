@@ -52,7 +52,7 @@ export default function SentinelControlPage() {
 
   // Login Gate State
   const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
-  const [loginEmail, setLoginEmail] = useState("root@sentinel.security");
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
@@ -460,6 +460,7 @@ export default function SentinelControlPage() {
                 type="email"
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="operator@domain.com"
                 style={{ width: "360px" }}
                 required
               />
