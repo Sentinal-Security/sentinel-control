@@ -8,9 +8,11 @@
     "start": "next start -p 3004"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.5",
     "next": "16.3.5",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "tailwindcss": "^4.3.5"
   },
   "devDependencies": {
     "@types/node": "^20",
