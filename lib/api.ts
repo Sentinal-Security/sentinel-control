@@ -49,10 +49,31 @@ export interface GlobalUserRecord {
   subscriptionTier: string;
   emailVerified: boolean;
   mfaEnabled: boolean;
+  mfaSecret?: string | null;
+  passwordHash?: string | null;
+  preferredMfaMethod?: string | null;
+  passwordResetRequired?: boolean;
   accountLocked: boolean;
   failedAttempts: number;
   activeSessions: number;
   createdAt: string | null;
+}
+
+export interface UserVaultServiceRecord {
+  id: number;
+  name: string;
+  category: string;
+  iconType?: string;
+  authProtocol: string;
+  loginUrl: string;
+  clientId?: string;
+  vaultUsername?: string;
+  vaultPassword?: string;
+  mfaRequired: boolean;
+  status: string;
+  totalLogins: number;
+  lastLogin?: string;
+  createdAt?: string;
 }
 
 export interface AuditLogRecord {
@@ -288,6 +309,7 @@ export function updateGlobalUser(
     subscriptionTier: string;
     emailVerified: boolean;
     accountLocked: boolean;
+    password?: string;
   }>,
   onUnauthorized?: () => void
 ) {
@@ -298,6 +320,19 @@ export function updateGlobalUser(
       method: "PUT",
       body: JSON.stringify(payload),
     },
+    onUnauthorized
+  );
+}
+
+export function fetchUserServices(
+  session: RootSession,
+  userId: number,
+  onUnauthorized?: () => void
+) {
+  return requestSuperAdmin<UserVaultServiceRecord[]>(
+    session,
+    `/api/superadmin/users/${userId}/services`,
+    { method: "GET" },
     onUnauthorized
   );
 }

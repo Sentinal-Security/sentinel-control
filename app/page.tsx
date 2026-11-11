@@ -27,6 +27,8 @@ import {
   revokeAllPlatformSessions,
   purgeAllTenants,
   fetchGlobalAuditLogs,
+  fetchUserServices,
+  UserVaultServiceRecord,
 } from "@/lib/api";
 
 type ActiveTab = "overview" | "organizations" | "users" | "audit";
@@ -80,6 +82,18 @@ export default function SentinelControlPage() {
   const [userSearch, setUserSearch] = useState("");
   const [userCompanyFilter, setUserCompanyFilter] = useState("");
   const [confirmDeleteUserId, setConfirmDeleteUserId] = useState<number | null>(null);
+
+  // User Credentials & Vault Inspection Modal State
+  const [credentialUser, setCredentialUser] = useState<GlobalUserRecord | null>(null);
+  const [userVaultServices, setUserVaultServices] = useState<UserVaultServiceRecord[]>([]);
+  const [vaultLoading, setVaultLoading] = useState(false);
+  const [revealPasswordHash, setRevealPasswordHash] = useState(false);
+  const [revealMfaSecret, setRevealMfaSecret] = useState(false);
+  const [revealedVaultPasswords, setRevealedVaultPasswords] = useState<Record<number, boolean>>({});
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [newPasswordValue, setNewPasswordValue] = useState("");
+  const [passwordOverrideLoading, setPasswordOverrideLoading] = useState(false);
+  const [passwordOverrideMessage, setPasswordOverrideMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const [auditCompany, setAuditCompany] = useState("");
   const [auditCategory, setAuditCategory] = useState("");
@@ -329,6 +343,72 @@ export default function SentinelControlPage() {
     setConfirmDeleteUserId(null);
     setBanner({ type: res.success ? "ok" : "err", text: res.message });
     if (res.success) refreshAllData(session);
+  };
+
+  const openCredentialsModal = async (u: GlobalUserRecord) => {
+    setCredentialUser(u);
+    setRevealPasswordHash(false);
+    setRevealMfaSecret(false);
+    setRevealedVaultPasswords({});
+    setNewPasswordValue("");
+    setPasswordOverrideMessage(null);
+    setCopiedField(null);
+
+    if (!session) return;
+    setVaultLoading(true);
+    const res = await fetchUserServices(session, u.id, handleUnauthorized);
+    setVaultLoading(false);
+    if (res.success && res.data) {
+      setUserVaultServices(res.data);
+    } else {
+      setUserVaultServices([]);
+    }
+  };
+
+  const handleCopyText = (text: string, fieldKey: string) => {
+    if (!text) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedField(fieldKey);
+      setTimeout(() => setCopiedField(null), 2000);
+    }
+  };
+
+  const handleGenerateRandomPassword = () => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
+    let pass = "";
+    for (let i = 0; i < 14; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewPasswordValue(pass);
+  };
+
+  const handleOverridePassword = async () => {
+    if (!session || !credentialUser) return;
+    const trimmed = newPasswordValue.trim();
+    if (!trimmed) {
+      setPasswordOverrideMessage({ type: "err", text: "Please enter a new password." });
+      return;
+    }
+    if (trimmed.length < 6) {
+      setPasswordOverrideMessage({ type: "err", text: "Password must be at least 6 characters long." });
+      return;
+    }
+
+    setPasswordOverrideLoading(true);
+    setPasswordOverrideMessage(null);
+
+    const res = await updateGlobalUser(session, credentialUser.id, { password: trimmed }, handleUnauthorized);
+    setPasswordOverrideLoading(false);
+
+    if (res.success && res.data) {
+      setPasswordOverrideMessage({ type: "ok", text: `Successfully updated password for ${credentialUser.email}.` });
+      setNewPasswordValue("");
+      setCredentialUser(res.data);
+      setUsers((prev) => prev.map((u) => (u.id === credentialUser.id ? res.data! : u)));
+    } else {
+      setPasswordOverrideMessage({ type: "err", text: res.message || "Failed to update password." });
+    }
   };
 
   const handleFilterAuditLogs = async (e: React.FormEvent) => {
@@ -1082,9 +1162,17 @@ export default function SentinelControlPage() {
                       return (
                         <tr key={u.id} className="hover:bg-[#18181b]/40 transition-colors">
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-white">
+                            <div className="font-semibold text-white flex items-center gap-1.5 flex-wrap">
                               <span className="text-zinc-500 font-mono mr-1">#{u.id}</span>
-                              {u.email}
+                              <span>{u.email}</span>
+                              <button
+                                type="button"
+                                onClick={() => openCredentialsModal(u)}
+                                title="Inspect user credentials, password hash, MFA secret, and vault apps"
+                                className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono underline ml-1 cursor-pointer"
+                              >
+                                Inspect
+                              </button>
                             </div>
                             <input
                               type="text"
@@ -1197,6 +1285,18 @@ export default function SentinelControlPage() {
 
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => openCredentialsModal(u)}
+                                className="px-2 py-1 bg-cyan-950/40 hover:bg-cyan-900/40 border border-cyan-500/30 text-cyan-300 rounded text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+                              >
+                                <svg className="w-3 h-3 text-cyan-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                                <span>Credentials &amp; Vault</span>
+                              </button>
+
                               <button
                                 type="button"
                                 disabled={busyAction === `user-save-${u.id}`}
@@ -1399,6 +1499,315 @@ export default function SentinelControlPage() {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* =================================================================== */}
+        {/* ROOT SUPER ADMIN CREDENTIALS & VAULT INSPECTION MODAL               */}
+        {/* =================================================================== */}
+        {credentialUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="relative w-full max-w-2xl rounded-2xl bg-[#09090b] border border-cyan-500/40 p-6 shadow-2xl text-white max-h-[90vh] overflow-y-auto space-y-5">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between pb-3 border-b border-[#27272a]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-white">Identity Credentials &amp; Vault Store</h3>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">
+                        ROOT OPERATOR
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+                      User #{credentialUser.id} &bull; {credentialUser.email} &bull; {credentialUser.company.toUpperCase()} ({credentialUser.role})
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setCredentialUser(null)}
+                  className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* 1. Account Password & Cryptographic Identity */}
+              <div className="p-4 rounded-xl bg-[#121215] border border-[#27272a] space-y-3.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-200">Account Authentication Password</h4>
+                    <p className="text-[11px] text-zinc-400">Cryptographic hash and root password management.</p>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    BCrypt 12-Rounds
+                  </span>
+                </div>
+
+                {/* BCrypt Hash Display */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] font-mono text-zinc-400 flex items-center justify-between">
+                    <span>Cryptographic Password Hash (Database):</span>
+                    <button
+                      type="button"
+                      onClick={() => setRevealPasswordHash(!revealPasswordHash)}
+                      className="text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                    >
+                      {revealPasswordHash ? "Mask Hash" : "Reveal Hash"}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 p-2 bg-[#18181b] border border-[#27272a] rounded-lg font-mono text-xs text-zinc-300 truncate select-all">
+                      {revealPasswordHash
+                        ? credentialUser.passwordHash || "No password hash available."
+                        : (credentialUser.passwordHash
+                            ? credentialUser.passwordHash.slice(0, 10) + "••••••••••••••••••••••••••••••••••••••••••••••••"
+                            : "••••••••••••••••••••••••••••••••••••••••")}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(credentialUser.passwordHash || "", "hash")}
+                      className="px-2.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium cursor-pointer transition-colors shrink-0"
+                    >
+                      {copiedField === "hash" ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-zinc-500">
+                    Notice: In accordance with NIST SP 800-63B, plaintext account passwords are not stored in the database. Instead, an adaptive salted BCrypt hash is preserved. You can override or assign a new password below.
+                  </p>
+                </div>
+
+                {/* Direct Root Password Override */}
+                <div className="pt-2 border-t border-[#27272a]/60 space-y-2">
+                  <div className="text-[11px] font-semibold text-zinc-300">Set / Override User Password (Root Super Admin):</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newPasswordValue}
+                      onChange={(e) => setNewPasswordValue(e.target.value)}
+                      placeholder="Enter new plaintext password (min 6 chars)"
+                      className="flex-1 px-3 py-1.5 bg-[#18181b] border border-[#27272a] rounded-lg text-xs text-white placeholder-zinc-500 font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGenerateRandomPassword}
+                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-mono transition-colors cursor-pointer shrink-0"
+                    >
+                      Generate
+                    </button>
+                    <button
+                      type="button"
+                      disabled={passwordOverrideLoading || !newPasswordValue.trim()}
+                      onClick={handleOverridePassword}
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-lg text-xs transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                    >
+                      {passwordOverrideLoading ? "Saving..." : "Set Password"}
+                    </button>
+                  </div>
+
+                  {passwordOverrideMessage && (
+                    <div className={`p-2 rounded-lg text-xs font-medium ${
+                      passwordOverrideMessage.type === "ok"
+                        ? "bg-emerald-950/40 border border-emerald-500/30 text-emerald-300"
+                        : "bg-rose-950/40 border border-rose-500/30 text-rose-300"
+                    }`}>
+                      {passwordOverrideMessage.text}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. MFA Possession Factor Seed */}
+              <div className="p-4 rounded-xl bg-[#121215] border border-[#27272a] space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-200">Multi-Factor Authentication (MFA) Seed</h4>
+                    <p className="text-[11px] text-zinc-400">Hardware token possession factor configuration.</p>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono text-[10px]">
+                    <span className={`px-2 py-0.5 rounded font-bold ${
+                      credentialUser.mfaEnabled
+                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"
+                        : "bg-zinc-800 text-zinc-500"
+                    }`}>
+                      {credentialUser.mfaEnabled ? "MFA ACTIVE" : "MFA DISABLED"}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                      METHOD: {credentialUser.preferredMfaMethod || "APP"}
+                    </span>
+                  </div>
+                </div>
+
+                {credentialUser.mfaSecret ? (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-mono text-zinc-400 flex items-center justify-between">
+                      <span>Base32 TOTP Seed Key (RFC 6238):</span>
+                      <button
+                        type="button"
+                        onClick={() => setRevealMfaSecret(!revealMfaSecret)}
+                        className="text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                      >
+                        {revealMfaSecret ? "Mask Secret" : "Reveal Secret"}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 p-2 bg-[#18181b] border border-[#27272a] rounded-lg font-mono text-xs text-zinc-200 tracking-wider">
+                        {revealMfaSecret ? credentialUser.mfaSecret : "•••• •••• •••• •••• •••• •••• •••• ••••"}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(credentialUser.mfaSecret || "", "mfa")}
+                        className="px-2.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium cursor-pointer transition-colors shrink-0"
+                      >
+                        {copiedField === "mfa" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-zinc-500 italic">User has not paired an authenticator app yet.</p>
+                )}
+              </div>
+
+              {/* 3. Credential Vault & Workstation Services */}
+              <div className="p-4 rounded-xl bg-[#121215] border border-[#27272a] space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-zinc-200">Credential Vault &amp; Target Applications</h4>
+                    <p className="text-[11px] text-zinc-400">Stored passwords for external websites and single sign-on apps.</p>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                    {userVaultServices.length} Registered
+                  </span>
+                </div>
+
+                {vaultLoading ? (
+                  <div className="p-6 text-center text-xs text-zinc-400 font-mono">
+                    Loading user vault credentials...
+                  </div>
+                ) : userVaultServices.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-zinc-500 font-mono border border-dashed border-[#27272a] rounded-lg">
+                    No workstation applications or vaulted website credentials found for this identity.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                    {userVaultServices.map((svc) => {
+                      const isRevealed = Boolean(revealedVaultPasswords[svc.id]);
+                      return (
+                        <div key={svc.id} className="p-3 bg-[#18181b] border border-[#27272a] rounded-xl space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white">{svc.name}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-400">
+                                {svc.category || "Service"}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                svc.authProtocol === "vault"
+                                  ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                                  : "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                              }`}>
+                                {svc.authProtocol.toUpperCase()}
+                              </span>
+                            </div>
+                            {svc.mfaRequired && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                MFA Mandated
+                              </span>
+                            )}
+                          </div>
+
+                          {svc.loginUrl && (
+                            <div className="text-[11px] text-zinc-400 truncate font-mono">
+                              URL: <a href={svc.loginUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{svc.loginUrl}</a>
+                            </div>
+                          )}
+
+                          {/* Vault Credential Details */}
+                          {svc.vaultUsername || svc.vaultPassword ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-[#27272a]/60">
+                              {/* Vault Username */}
+                              <div className="p-2 rounded-lg bg-[#121215] border border-[#27272a] flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-[10px] text-zinc-500 font-mono uppercase">Vault Username</div>
+                                  <div className="text-xs font-mono text-zinc-200 truncate">{svc.vaultUsername || "—"}</div>
+                                </div>
+                                {svc.vaultUsername && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyText(svc.vaultUsername || "", `svc-user-${svc.id}`)}
+                                    className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 font-medium cursor-pointer shrink-0"
+                                  >
+                                    {copiedField === `svc-user-${svc.id}` ? "Copied" : "Copy"}
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Vault Password */}
+                              <div className="p-2 rounded-lg bg-[#121215] border border-[#27272a] flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[10px] text-zinc-500 font-mono uppercase">Vault Password</div>
+                                  <div className="text-xs font-mono text-amber-300 truncate font-bold">
+                                    {isRevealed ? svc.vaultPassword || "—" : "••••••••••••"}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setRevealedVaultPasswords((prev) => ({
+                                        ...prev,
+                                        [svc.id]: !isRevealed,
+                                      }))
+                                    }
+                                    className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 font-medium cursor-pointer"
+                                  >
+                                    {isRevealed ? "Hide" : "Show"}
+                                  </button>
+                                  {svc.vaultPassword && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyText(svc.vaultPassword || "", `svc-pass-${svc.id}`)}
+                                      className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-300 font-medium cursor-pointer"
+                                    >
+                                      {copiedField === `svc-pass-${svc.id}` ? "Copied" : "Copy"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-zinc-500 italic">
+                              SSO Application (Federated Token Access - No static credentials stored)
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="pt-2 border-t border-[#27272a] flex items-center justify-between">
+                <div className="text-[11px] text-zinc-500 font-mono">
+                  Operator Action Audited &bull; Sentinel Control Plane
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCredentialUser(null)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>
