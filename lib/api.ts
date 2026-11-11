@@ -350,6 +350,30 @@ export function resetUserMfa(
   );
 }
 
+export function impersonateUser(
+  session: RootSession,
+  userId: number,
+  onUnauthorized?: () => void
+) {
+  return requestSuperAdmin<{
+    ssoToken: string;
+    userId: number;
+    email: string;
+    fullName: string;
+    company: string;
+    role: string;
+    subscriptionTier: string;
+    mfaEnabled: boolean;
+    impersonated: boolean;
+    impersonatedBy: string;
+  }>(
+    session,
+    `/api/superadmin/users/${userId}/impersonate`,
+    { method: "POST" },
+    onUnauthorized
+  );
+}
+
 export function revokeUserSessions(
   session: RootSession,
   userId: number,
