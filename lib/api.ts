@@ -99,7 +99,12 @@ export function loadRootSession(): RootSession | null {
   try {
     const raw = window.sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as RootSession;
+    const parsed = JSON.parse(raw) as RootSession;
+    if (parsed.expiresAt && Date.parse(parsed.expiresAt) <= Date.now()) {
+      clearRootSession();
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }

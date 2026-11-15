@@ -135,6 +135,26 @@ export default function SentinelControlPage() {
     setUserDrafts(next);
   };
 
+  const refreshAuditLogsOnly = useCallback(
+    async (activeSession: RootSession) => {
+      const logRes = await fetchGlobalAuditLogs(
+        activeSession,
+        {
+          company: auditCompany || undefined,
+          category: auditCategory || undefined,
+          severity: auditSeverity || undefined,
+          search: auditSearch || undefined,
+          limit: auditLimit,
+        },
+        handleUnauthorized
+      );
+      if (logRes.success && logRes.data) {
+        setAuditLogs(logRes.data);
+      }
+    },
+    [auditCategory, auditCompany, auditLimit, auditSearch, auditSeverity, handleUnauthorized]
+  );
+
   const refreshAllData = useCallback(
     async (activeSession: RootSession) => {
       setBusyAction("refresh");
@@ -145,11 +165,7 @@ export default function SentinelControlPage() {
         fetchGlobalAuditLogs(
           activeSession,
           {
-            company: auditCompany || undefined,
-            category: auditCategory || undefined,
-            severity: auditSeverity || undefined,
-            search: auditSearch || undefined,
-            limit: auditLimit,
+            limit: 100,
           },
           handleUnauthorized
         ),
@@ -172,7 +188,7 @@ export default function SentinelControlPage() {
         setBanner({ type: "err", text: ovRes.message });
       }
     },
-    [auditCategory, auditCompany, auditLimit, auditSearch, auditSeverity, handleUnauthorized]
+    [handleUnauthorized]
   );
 
   useEffect(() => {
@@ -183,8 +199,12 @@ export default function SentinelControlPage() {
         if (res.success) {
           setSession(stored);
           refreshAllData(stored);
-        } else {
+        } else if (res.message && !res.message.toLowerCase().includes("network") && !res.message.toLowerCase().includes("fetch")) {
           clearRootSession();
+          setLoginError(res.message);
+        } else {
+          setSession(stored);
+          setBanner({ type: "err", text: res.message || "Gateway unreachable; retrying may be needed." });
         }
         setHydrated(true);
       });
@@ -192,6 +212,14 @@ export default function SentinelControlPage() {
       setHydrated(true);
     }
   }, [handleUnauthorized, refreshAllData]);
+
+  useEffect(() => {
+    if (!session) return;
+    const timer = setTimeout(() => {
+      refreshAuditLogsOnly(session);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [session, refreshAuditLogsOnly]);
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -359,9 +387,10 @@ export default function SentinelControlPage() {
       });
 
       const webBaseUrl =
-        typeof window !== "undefined" && window.location.hostname === "localhost"
+        process.env.NEXT_PUBLIC_WEB_URL ||
+        (typeof window !== "undefined" && window.location.hostname === "localhost"
           ? "http://localhost:3000"
-          : "https://web-beta-orcin-33.vercel.app";
+          : "https://web-beta-orcin-33.vercel.app");
 
       const launchUrl = `${webBaseUrl}/login?impersonate_token=${encodeURIComponent(res.data.ssoToken)}`;
       window.open(launchUrl, "_blank", "noopener,noreferrer");
@@ -390,23 +419,30 @@ export default function SentinelControlPage() {
       setUserVaultServices(res.data);
     } else {
       setUserVaultServices([]);
+      setPasswordOverrideMessage({ type: "err", text: res.message || "Failed to load workstation applications." });
     }
   };
 
-  const handleCopyText = (text: string, fieldKey: string) => {
+  const handleCopyText = async (text: string, fieldKey: string) => {
     if (!text) return;
     if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      setCopiedField(fieldKey);
-      setTimeout(() => setCopiedField(null), 2000);
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopiedField(fieldKey);
+        setTimeout(() => setCopiedField(null), 2000);
+      } catch {
+        setBanner({ type: "err", text: "Clipboard access denied by browser." });
+      }
     }
   };
 
   const handleGenerateRandomPassword = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
+    const buf = new Uint32Array(14);
+    window.crypto.getRandomValues(buf);
     let pass = "";
     for (let i = 0; i < 14; i++) {
-      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+      pass += chars.charAt(buf[i] % chars.length);
     }
     setNewPasswordValue(pass);
   };
@@ -1778,11 +1814,24 @@ export default function SentinelControlPage() {
                             )}
                           </div>
 
-                          {svc.loginUrl && (
-                            <div className="text-[11px] text-zinc-400 truncate font-mono">
-                              URL: <a href={svc.loginUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{svc.loginUrl}</a>
-                            </div>
-                          )}
+                          {svc.loginUrl && (() => {
+                            let safeHref: string | null = null;
+                            try {
+                              const parsed = new URL(svc.loginUrl);
+                              if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+                                safeHref = parsed.toString();
+                              }
+                            } catch {}
+                            return safeHref ? (
+                              <div className="text-[11px] text-zinc-400 truncate font-mono">
+                                URL: <a href={safeHref} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{svc.loginUrl}</a>
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-zinc-500 truncate font-mono">
+                                URL: {svc.loginUrl}
+                              </div>
+                            );
+                          })()}
 
                           {/* Vault Credential Details */}
                           {svc.vaultUsername || svc.vaultPassword ? (
