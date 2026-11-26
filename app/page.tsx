@@ -17,6 +17,8 @@ import {
   fetchOrganizations,
   suspendOrganization,
   activateOrganization,
+  sendOrgExpirationWarning,
+  revokeOrgSubscription,
   updateOrganizationPolicy,
   terminateOrganization,
   fetchAllUsers,
@@ -311,6 +313,29 @@ export default function SentinelControlPage() {
     if (!session) return;
     setBusyAction(`org-activate-${company}`);
     const res = await activateOrganization(session, company, handleUnauthorized);
+    setBusyAction(null);
+    setBanner({ type: res.success ? "ok" : "err", text: res.message });
+    if (res.success) refreshAllData(session);
+  };
+
+  const handleSendOrgWarning = async (company: string) => {
+    if (!session) return;
+    setBusyAction(`org-warn-${company}`);
+    const res = await sendOrgExpirationWarning(session, company, undefined, handleUnauthorized);
+    setBusyAction(null);
+    setBanner({ type: res.success ? "ok" : "err", text: res.message });
+    if (res.success) refreshAllData(session);
+  };
+
+  const handleRevokeOrgSubscription = async (company: string) => {
+    if (!session) return;
+    setBusyAction(`org-revoke-sub-${company}`);
+    const res = await revokeOrgSubscription(
+      session,
+      company,
+      orgDrafts[company]?.suspendReason || undefined,
+      handleUnauthorized
+    );
     setBusyAction(null);
     setBanner({ type: res.success ? "ok" : "err", text: res.message });
     if (res.success) refreshAllData(session);
@@ -1096,6 +1121,25 @@ export default function SentinelControlPage() {
                                   Reactivate Contract
                                 </button>
                               )}
+
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={busyAction === `org-warn-${org.company}`}
+                                  onClick={() => handleSendOrgWarning(org.company)}
+                                  className="px-2 py-1 bg-amber-950/60 hover:bg-amber-900/60 border border-amber-500/30 text-amber-300 rounded text-[11px] font-medium transition-colors cursor-pointer"
+                                >
+                                  {busyAction === `org-warn-${org.company}` ? "Sending..." : "Send Warning"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busyAction === `org-revoke-sub-${org.company}`}
+                                  onClick={() => handleRevokeOrgSubscription(org.company)}
+                                  className="px-2 py-1 bg-orange-950/60 hover:bg-orange-900/60 border border-orange-500/30 text-orange-300 rounded text-[11px] font-medium transition-colors cursor-pointer"
+                                >
+                                  {busyAction === `org-revoke-sub-${org.company}` ? "Revoking..." : "Revoke Plan"}
+                                </button>
+                              </div>
 
                               {terminatingOrg !== org.company ? (
                                 <button

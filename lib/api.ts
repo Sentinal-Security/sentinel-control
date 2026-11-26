@@ -260,6 +260,45 @@ export function activateOrganization(
   );
 }
 
+export function sendOrgExpirationWarning(
+  session: RootSession,
+  company: string,
+  customMessage?: string,
+  onUnauthorized?: () => void
+) {
+  return requestSuperAdmin<{ company: string; sentCount: number }>(
+    session,
+    "/api/superadmin/organizations/expiration-warning",
+    {
+      method: "POST",
+      body: JSON.stringify({ company, customMessage }),
+    },
+    onUnauthorized
+  );
+}
+
+export function revokeOrgSubscription(
+  session: RootSession,
+  company: string,
+  reason?: string,
+  onUnauthorized?: () => void
+) {
+  return requestSuperAdmin<{
+    company: string;
+    subscriptionTier: string;
+    subscriptionStatus: string;
+    updatedUsers: number;
+  }>(
+    session,
+    "/api/superadmin/organizations/revoke-subscription",
+    {
+      method: "POST",
+      body: JSON.stringify({ company, reason }),
+    },
+    onUnauthorized
+  );
+}
+
 export function updateOrganizationPolicy(
   session: RootSession,
   company: string,
